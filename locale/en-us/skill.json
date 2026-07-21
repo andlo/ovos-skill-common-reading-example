@@ -1,0 +1,13 @@
+{
+  "skill_id": "ovos-skill-common-reading-example.andlo",
+  "source": "https://github.com/andlo/ovos-skill-common-reading-example",
+  "package_name": "ovos-skill-common-reading-example",
+  "pip_spec": "ovos-skill-common-reading-example",
+  "license": "GPL-3.0-or-later",
+  "author": "andlo",
+  "name": "Common Reading Example (template)",
+  "description": "Template/example provider for ovos-skill-common-reading. Copy and adapt - not meant to be installed for its own content.",
+  "examples": [],
+  "tags": ["template", "example", "provider", "orchestrator"],
+  "icon": "https://raw.githubusercontent.com/andlo/ovos-skill-common-reading-example/main/story-512.png"
+}
