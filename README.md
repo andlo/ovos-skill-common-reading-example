@@ -2,7 +2,7 @@
 
 A **template**, not a product. Copy this repo and adapt it to build your
 own provider skill for
-[ovos-skill-common-reading](https://github.com/andlo/ovos-skill-common-reading).
+[ovos-common-reading-pipeline-plugin](https://github.com/andlo/ovos-common-reading-pipeline-plugin).
 
 [![Tests](https://github.com/andlo/ovos-skill-common-reading-example/actions/workflows/test.yml/badge.svg)](https://github.com/andlo/ovos-skill-common-reading-example/actions/workflows/test.yml)
 
