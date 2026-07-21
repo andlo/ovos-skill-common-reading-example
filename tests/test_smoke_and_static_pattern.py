@@ -1,9 +1,10 @@
-"""Smoke tests + Pattern B (StaticPageScraper) tests."""
+"""Smoke tests + Pattern B (StaticPageScraper) tests + decision point #4
+(language_is_supported, the load-time language gate helper)."""
 from unittest.mock import MagicMock
 
 import pytest
 import requests
-from conftest import CommonReadingExample, StaticPageScraper, ContentFetchError
+from conftest import CommonReadingExample, StaticPageScraper, ContentFetchError, language_is_supported
 
 
 def test_imports_cleanly():
@@ -14,6 +15,16 @@ def test_imports_cleanly():
 def test_is_an_ovos_skill():
     from ovos_workshop.skills import OVOSSkill
     assert issubclass(CommonReadingExample, OVOSSkill)
+
+
+@pytest.mark.parametrize("lang", ["en-us", "en-gb", "da-dk"])
+def test_language_is_supported_true_for_matching_base_code(lang):
+    assert language_is_supported(lang, {"en", "da"}) is True
+
+
+@pytest.mark.parametrize("lang", ["de-de", "fr-fr", "pt-pt"])
+def test_language_is_supported_false_for_non_matching(lang):
+    assert language_is_supported(lang, {"en", "da"}) is False
 
 
 STATIC_INDEX_HTML = """

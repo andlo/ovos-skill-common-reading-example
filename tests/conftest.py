@@ -13,6 +13,7 @@ _spec.loader.exec_module(_module)
 CommonReadingExample = _module.CommonReadingExample
 StaticPageScraper = _module.StaticPageScraper
 ContentFetchError = _module.ContentFetchError
+language_is_supported = _module.language_is_supported
 COMMON_READING_SEARCH_RESPONSE = _module.COMMON_READING_SEARCH_RESPONSE
 COMMON_READING_FETCH_CONTENT_RESPONSE = _module.COMMON_READING_FETCH_CONTENT_RESPONSE
 

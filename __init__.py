@@ -65,6 +65,38 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      HTML and decide what to keep (see extract_paragraphs below for one
      real example of this kind of decision - inline <code> is kept as
      part of its sentence, but full <pre> code blocks are dropped).
+
+  4. IF YOU DON'T TRANSLATE, REFUSE TO LOAD FOR UNSUPPORTED LANGUAGES -
+     DON'T JUST DECLINE SEARCHES AT RUNTIME.
+     This example (Pattern A) translates, so it always loads regardless
+     of device language - see decision point #1. But most sources DON'T
+     have a good reason to translate (see ovos-skill-andersen-tales/
+     ovos-skill-grimm-tales/ovos-skill-andrew-lang-tales: real
+     per-language sources or none at all, no translation attempted).
+     For those, the right pattern is a SUPPORTED_LANGUAGES set checked
+     at the TOP of initialize(), before building any index or
+     registering any bus events (see language_is_supported() below):
+
+         SUPPORTED_LANGUAGES = {"en", "da", "de"}  # whatever your source covers
+
+         def initialize(self):
+             if not language_is_supported(self.lang, SUPPORTED_LANGUAGES):
+                 self.log.info(
+                     f"{self.skill_id}: device language '{self.lang}' not "
+                     f"supported and this provider does not translate - "
+                     f"skill will stay inert."
+                 )
+                 self.index = {}
+                 return
+             # ... normal setup: build index, self.add_event(...), etc.
+
+     This is meaningfully better than gating inside handle_search(): the
+     skill never wastes work building an index it can't use, never even
+     listens for ovos.common_reading.search on an unsupported device,
+     and the log clearly explains why at load time instead of the
+     provider just mysteriously never answering. See
+     ovos-skill-andersen-tales's __init__.py for the real version of
+     this pattern.
 """
 
 from ovos_workshop.skills import OVOSSkill
@@ -88,6 +120,16 @@ STATIC_INDEX_URL = "https://www.andersenstories.com/en/andersen_fairy-tales/list
 
 class ContentFetchError(Exception):
     """Raised when content could not be fetched or parsed."""
+
+
+def language_is_supported(lang, supported_languages):
+    """Pure helper for decision point #4 (see module docstring): pull
+    the base language code out of a full lang tag ('en-us' -> 'en') and
+    check it against your provider's supported set. Copy this check to
+    the top of your own initialize() if your source doesn't translate -
+    return early (no index built, no bus events registered) when this
+    is False, logging why."""
+    return lang.split("-")[0] in supported_languages
 
 
 # ovos.common_reading.* bus protocol - see ovos-skill-common-reading/README.md
