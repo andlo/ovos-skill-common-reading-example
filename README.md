@@ -45,7 +45,7 @@ class instead. The exact selectors here (`itemprop="name"`,
 `itemprop="text"`) are specific to andersenstories.com; your source will
 need its own, found by inspecting its actual HTML.
 
-## Five decisions that are on you, not the template
+## Six decisions that are on you, not the template
 
 1. **Should this content be machine-translated?** Blog posts: usually
    fine, with disclosure via `machine_translated` in the search
@@ -70,6 +70,19 @@ need its own, found by inspecting its actual HTML.
    `ovos-skill-andersen-tales`, `ovos-skill-arxiv-papers`,
    `ovos-skill-365tomorrows-stories`. Makes a skill's purpose legible at
    a glance in a list of a dozen providers.
+6. **If you support multiple languages without translating, localize
+   `COLLECTION_ALIASES`/`AUTHOR_NAME`/`COLLECTION_NAME` too** - don't
+   hardcode them in English. A German user saying "die Gebrüder Grimm"
+   only matches an English-only alias list by luck, and the pipeline's
+   pre-reading announcement ends up mixing languages otherwise. Load
+   these from `locale/<lang>/collection.voc` +
+   `locale/<lang>/collection_meta.json` via `self.resources` instead of
+   Python constants - see
+   [ovos-common-reading-pipeline-plugin#26](https://github.com/andlo/ovos-common-reading-pipeline-plugin/issues/26)
+   and `ovos-skill-andersen-tales`/`ovos-skill-grimm-tales` for the real
+   version of this pattern. Bonus: this also means every language gets
+   its own `locale/<lang>/skill.json`, so the Skills Store can see how
+   many languages your provider actually supports.
 
 See the module docstring in `__init__.py` for the full walkthrough.
 

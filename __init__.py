@@ -111,6 +111,54 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      'fairytales' skill with a different architecture - see
      ovos-skill-fairytales vs. this family's ovos-skill-andersen-tales/
      ovos-skill-grimm-tales, which deliberately don't reuse that name).
+
+  6. IF YOU SUPPORT MULTIPLE LANGUAGES WITHOUT TRANSLATING, LOCALIZE
+     YOUR COLLECTION_ALIASES/AUTHOR_NAME/COLLECTION_NAME TOO - DON'T
+     HARDCODE THEM IN ENGLISH.
+     This example (Pattern A) translates, so it only ever needs one
+     English collection name - see decision point #1. But a provider
+     using the SUPPORTED_LANGUAGES gate (decision point #4) genuinely
+     serves several languages without translating, and 'the Brothers
+     Grimm'/'Grimm's Fairy Tales' hardcoded in English breaks two
+     things: a German user saying 'die Gebrüder Grimm' as a
+     collection_hint only matches by luck (if it happens to share a
+     substring with the English alias), and the pipeline's pre-reading
+     announcement ends up mixing languages - a correctly-localized
+     German title glued to an English author/collection name.
+
+     Fix: load these from locale/<lang>/ instead of Python constants,
+     using OVOS's own resource file resolution (self.resources) rather
+     than reinventing language fallback:
+
+         def initialize(self):
+             ...
+             self._load_collection_meta()  # after the language gate passes
+             ...
+
+         def _load_collection_meta(self):
+             aliases_raw = self.resources.load_vocabulary_file("collection")
+             self._collection_aliases = [phrase for line in aliases_raw for phrase in line]
+             meta = self.resources.load_json_file("collection_meta.json")
+             self._author_name = meta["author"]
+             self._collection_name = meta["collection"]
+
+     ...with locale/<lang>/collection.voc (one alias phrase per line -
+     the idiomatic OVOS mechanism for "list of phrases meaning the same
+     thing") and locale/<lang>/collection_meta.json
+     (`{"author": "...", "collection": "..."}`) for every language in
+     your SUPPORTED_LANGUAGES set. You only need ONE folder per
+     canonical language (e.g. locale/en-us/, not separate en-gb/en-au/
+     folders) - self.resources already does distance-based language
+     fallback (langcodes.tag_distance) when resolving these files, so a
+     device on 'en-gb' automatically finds locale/en-us/.
+
+     This also means every language needs its own locale/<lang>/
+     skill.json, not just en-us - per the OVOS technical manual, that's
+     how the Skills Store is meant to discover which languages a skill
+     actually supports. See ovos-skill-andersen-tales/
+     ovos-skill-grimm-tales's __init__.py and locale/ for the real
+     version of this pattern, and
+     ovos-common-reading-pipeline-plugin#26 for the full reasoning.
 """
 
 from ovos_workshop.skills import OVOSSkill
