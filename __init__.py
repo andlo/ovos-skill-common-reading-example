@@ -97,6 +97,20 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      provider just mysteriously never answering. See
      ovos-skill-andersen-tales's __init__.py for the real version of
      this pattern.
+
+  5. NAME YOUR REPO/PACKAGE ovos-skill-<NAME>-<CONTENT TYPE>.
+     Not a strict requirement, but every provider in this family follows
+     it, and it's a genuinely useful convention: ovos-skill-andersen-
+     tales, ovos-skill-grimm-tales, ovos-skill-arxiv-papers, ovos-skill-
+     365tomorrows-stories. <NAME> is whatever identifies the source
+     (an author, a site, a collection), <CONTENT TYPE> is a short plural
+     noun for what it delivers (tales, papers, stories, articles). This
+     makes a skill's purpose legible at a glance in a list of a dozen
+     providers, and keeps it distinct from same-named skills that do
+     something other than read content aloud (e.g. an existing
+     'fairytales' skill with a different architecture - see
+     ovos-skill-fairytales vs. this family's ovos-skill-andersen-tales/
+     ovos-skill-grimm-tales, which deliberately don't reuse that name).
 """
 
 from ovos_workshop.skills import OVOSSkill
@@ -137,6 +151,14 @@ COMMON_READING_SEARCH = "ovos.common_reading.search"
 COMMON_READING_SEARCH_RESPONSE = "ovos.common_reading.search.response"
 COMMON_READING_FETCH_CONTENT = "ovos.common_reading.fetch_content"  # + ".{this_skill_id}"
 COMMON_READING_FETCH_CONTENT_RESPONSE = "ovos.common_reading.fetch_content.response"
+# ping/pong: a lightweight 'is anyone there?' check, broadcast by the
+# pipeline plugin only on its rare 0-candidates path (never on every
+# search). Answering this is REQUIRED, not optional - a provider that
+# never pongs is indistinguishable from one that isn't installed at
+# all, from the pipeline's perspective. See
+# ovos-common-reading-pipeline-plugin's README, section 3.
+COMMON_READING_PING = "ovos.common_reading.ping"
+COMMON_READING_PONG = "ovos.common_reading.pong"
 
 # DECISION POINT #2 (see module docstring): pick names a human would
 # actually say, not your skill_id.
@@ -173,6 +195,7 @@ class CommonReadingExample(OVOSSkill):
         self.refresh_index()
         self.add_event(COMMON_READING_SEARCH, self.handle_search)
         self.add_event(f"{COMMON_READING_FETCH_CONTENT}.{self.skill_id}", self.handle_fetch_content)
+        self.add_event(COMMON_READING_PING, self.handle_ping)
 
     def _index_cache_filename(self):
         return "feed_index.json"
@@ -391,6 +414,22 @@ class CommonReadingExample(OVOSSkill):
         paragraphs = self.extract_paragraphs(entry["html"])
         paragraphs, _ = self._maybe_translate_paragraphs(paragraphs, self.lang)
         self.bus.emit(message.reply(COMMON_READING_FETCH_CONTENT_RESPONSE, {"paragraphs": paragraphs}))
+
+    def handle_ping(self, message):
+        """Cheap 'is anyone there?' reply - no index lookup, no
+        translation. Only ever called by the pipeline plugin on its
+        rare 0-candidates path, never on every search. REQUIRED for
+        every real provider - copy this as-is; there's rarely a reason
+        to customize it. If your provider uses the SUPPORTED_LANGUAGES
+        load-time gate (decision point #4), register this handler only
+        inside the 'language is supported' branch of initialize(),
+        exactly like COMMON_READING_SEARCH - a provider that refused to
+        load for the device's language should stay silent here too,
+        not falsely claim to be present."""
+        self.bus.emit(message.reply(COMMON_READING_PONG, {
+            "skill_id": self.skill_id,
+            "collection": COLLECTION_NAME,
+        }))
 
 
 class StaticPageScraper:

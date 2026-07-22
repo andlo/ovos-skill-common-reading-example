@@ -45,7 +45,7 @@ class instead. The exact selectors here (`itemprop="name"`,
 `itemprop="text"`) are specific to andersenstories.com; your source will
 need its own, found by inspecting its actual HTML.
 
-## Three decisions that are on you, not the template
+## Five decisions that are on you, not the template
 
 1. **Should this content be machine-translated?** Blog posts: usually
    fine, with disclosure via `machine_translated` in the search
@@ -60,18 +60,48 @@ need its own, found by inspecting its actual HTML.
    `<pre>` code blocks are dropped, but inline `<code>` is kept as part
    of its sentence (dropping it entirely broke sentence grammar - a real
    bug found while building `ovos-skill-ovosblog`).
+4. **If you don't translate, refuse to load for unsupported languages** -
+   don't just decline searches at runtime. Check `SUPPORTED_LANGUAGES`
+   at the top of `initialize()` (see `language_is_supported()` and the
+   module docstring) so an unsupported device never even builds an
+   index or registers bus events for a language it can't serve.
+5. **Name the repo/package `ovos-skill-<name>-<content type>`.** Not
+   strictly required, but every real provider follows it -
+   `ovos-skill-andersen-tales`, `ovos-skill-arxiv-papers`,
+   `ovos-skill-365tomorrows-stories`. Makes a skill's purpose legible at
+   a glance in a list of a dozen providers.
 
 See the module docstring in `__init__.py` for the full walkthrough.
+
+## Ping/pong: required, not optional
+
+Every provider must answer `ovos.common_reading.ping` with a
+`ovos.common_reading.pong` (`handle_ping()` here, wired in `initialize()`
+right alongside search/fetch_content). The pipeline plugin only
+broadcasts this on its rare 0-candidates path, to tell "nothing
+installed" apart from "nothing matched" (see
+[ovos-common-reading-pipeline-plugin#2](https://github.com/andlo/ovos-common-reading-pipeline-plugin/issues/2)).
+A provider that never pongs is indistinguishable, from the pipeline's
+side, from one that isn't installed at all - copy `handle_ping()` as-is,
+there's rarely a reason to customize it.
+
+If your provider uses the `SUPPORTED_LANGUAGES` gate (decision #4
+above), register the ping handler *only* inside the "language is
+supported" branch - exactly like the search handler. A provider that
+refused to load for the device's language should stay silent on ping
+too, not falsely claim to be present.
 
 ## How to use this as a template
 
 1. Fork or copy this repo
-2. Rename the class, package, `skill_id`
+2. Rename the class, package, `skill_id` - following the naming
+   convention above
 3. Decide: RSS (Pattern A) or static scraping (Pattern B)? Keep one, delete the other
 4. Point `FEED_URL` / `STATIC_INDEX_URL` at your source, adjust parsing to match its actual structure
-5. Make the three decisions above deliberately
+5. Make the five decisions above deliberately
 6. Copy the caching pattern as-is - it's the same across every provider
-7. Write tests before you trust any of it (see `tests/` here for the shape)
+7. Keep `handle_ping()` - see "Ping/pong" above
+8. Write tests before you trust any of it (see `tests/` here for the shape)
 
 See existing real providers for full worked examples:
 [ovos-skill-andersen-tales](https://github.com/andlo/ovos-skill-andersen-tales)

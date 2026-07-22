@@ -16,6 +16,7 @@ ContentFetchError = _module.ContentFetchError
 language_is_supported = _module.language_is_supported
 COMMON_READING_SEARCH_RESPONSE = _module.COMMON_READING_SEARCH_RESPONSE
 COMMON_READING_FETCH_CONTENT_RESPONSE = _module.COMMON_READING_FETCH_CONTENT_RESPONSE
+COMMON_READING_PONG = _module.COMMON_READING_PONG
 
 
 class FakeFileSystem:
