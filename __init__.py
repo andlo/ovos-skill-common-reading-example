@@ -209,8 +209,12 @@ COMMON_READING_PING = "ovos.common_reading.ping"
 COMMON_READING_PONG = "ovos.common_reading.pong"
 
 # DECISION POINT #2 (see module docstring): pick names a human would
-# actually say, not your skill_id.
-COLLECTION_ALIASES = ["openvoiceos blog", "ovos blog", "open voice os blog", "the openvoiceos blog"]
+# actually say, not your skill_id. DECISION POINT #7: since this
+# provider translates (works on ANY device language, no fixed
+# SUPPORTED_LANGUAGES set), COLLECTION_ALIASES below is a FALLBACK, not
+# the only source of truth - see _load_collection_aliases() and
+# locale/<lang>/collection.voc.
+FALLBACK_COLLECTION_ALIASES = ["openvoiceos blog", "ovos blog", "open voice os blog", "the openvoiceos blog"]
 CONTENT_TYPES = ["article", "blog", "news", "post"]
 COLLECTION_HINT_THRESHOLD = 0.85  # see ovos-skill-common-reading's README - don't go lower than this
 COLLECTION_NAME = "the OpenVoiceOS Blog"
@@ -240,10 +244,28 @@ class CommonReadingExample(OVOSSkill):
         self._translator = None
         self._translator_failed = False
         self._translated_titles_cache = {}  # lang_code -> {content_id: translated_title}
+        self._load_collection_aliases()
         self.refresh_index()
         self.add_event(COMMON_READING_SEARCH, self.handle_search)
         self.add_event(f"{COMMON_READING_FETCH_CONTENT}.{self.skill_id}", self.handle_fetch_content)
         self.add_event(COMMON_READING_PING, self.handle_ping)
+
+    def _load_collection_aliases(self):
+        """DECISION POINT #7 (see module docstring): since this provider
+        translates and works on ANY device language, there's no fixed
+        SUPPORTED_LANGUAGES set of locale/ folders to guarantee - so
+        unlike decision point #6's SUPPORTED_LANGUAGES-gated pattern,
+        this loads per-language aliases from
+        locale/<lang>/collection.voc where we've bothered to translate
+        them, and FALLS BACK to FALLBACK_COLLECTION_ALIASES (English)
+        for any language we haven't. Always loading successfully (never
+        leaving collection_hint matching completely broken) matters
+        more here than it does for a SUPPORTED_LANGUAGES-gated provider,
+        since THIS provider claims to serve every language, not just a
+        known set."""
+        aliases_raw = self.resources.load_vocabulary_file("collection")
+        aliases = [phrase for line in aliases_raw for phrase in line]
+        self._collection_aliases = aliases or FALLBACK_COLLECTION_ALIASES
 
     def _index_cache_filename(self):
         return "feed_index.json"
@@ -409,7 +431,7 @@ class CommonReadingExample(OVOSSkill):
     def _matches_collection_hint(self, hint):
         if not hint:
             return True
-        _, score = match_one(hint.lower(), COLLECTION_ALIASES)
+        _, score = match_one(hint.lower(), self._collection_aliases)
         return score >= COLLECTION_HINT_THRESHOLD
 
     def _matches_content_type(self, content_type):

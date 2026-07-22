@@ -45,7 +45,7 @@ class instead. The exact selectors here (`itemprop="name"`,
 `itemprop="text"`) are specific to andersenstories.com; your source will
 need its own, found by inspecting its actual HTML.
 
-## Six decisions that are on you, not the template
+## Seven decisions that are on you, not the template
 
 1. **Should this content be machine-translated?** Blog posts: usually
    fine, with disclosure via `machine_translated` in the search
@@ -83,6 +83,20 @@ need its own, found by inspecting its actual HTML.
    version of this pattern. Bonus: this also means every language gets
    its own `locale/<lang>/skill.json`, so the Skills Store can see how
    many languages your provider actually supports.
+7. **If you *do* translate (this example's own Pattern A does), still
+   localize `COLLECTION_ALIASES` - just with an English fallback
+   instead of a fixed language set.** A translating provider claims to
+   work on *any* device language, so there's no bounded list of
+   `locale/<lang>/` folders you can guarantee exist. `_load_collection_aliases()`
+   here loads `locale/<lang>/collection.voc` where we've bothered to
+   translate it, and falls back to `FALLBACK_COLLECTION_ALIASES`
+   (English) for anything else - never leaving `collection_hint`
+   matching completely broken on an untranslated language. See
+   `ovos-skill-ovosblog`/`ovos-skill-arxiv-papers`/
+   `ovos-skill-365tomorrows-stories` for the real version. Unlike
+   decision #6, `COLLECTION_NAME` usually stays untranslated here too -
+   proper nouns/brand names ("arXiv", "365tomorrows") don't need
+   translating the way "Grimm's Fairy Tales" does.
 
 See the module docstring in `__init__.py` for the full walkthrough.
 
