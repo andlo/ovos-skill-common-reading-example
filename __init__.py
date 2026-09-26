@@ -66,37 +66,43 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      real example of this kind of decision - inline <code> is kept as
      part of its sentence, but full <pre> code blocks are dropped).
 
-  4. IF YOU DON'T TRANSLATE, REFUSE TO LOAD FOR UNSUPPORTED LANGUAGES -
-     DON'T JUST DECLINE SEARCHES AT RUNTIME.
-     This example (Pattern A) translates, so it always loads regardless
-     of device language - see decision point #1. But most sources DON'T
-     have a good reason to translate (see ovos-skill-andersen-tales/
-     ovos-skill-grimm-tales/ovos-skill-andrew-lang-tales: real
-     per-language sources or none at all, no translation attempted).
-     For those, the right pattern is a SUPPORTED_LANGUAGES set checked
-     at the TOP of initialize(), before building any index or
-     registering any bus events (see language_is_supported() below):
+  4. IF YOU DON'T TRANSLATE, REFUSE TO LOAD UNLESS A CONFIGURED LANGUAGE
+     IS ONE YOU SUPPORT - DON'T JUST DECLINE SEARCHES AT RUNTIME.
+     This example (Pattern A) translates, so it loads whatever the
+     language - see decision point #1 (and #7 for which languages it
+     answers in). But most sources DON'T have a good reason to translate
+     (see ovos-skill-andersen-tales/ovos-skill-grimm-tales/
+     ovos-skill-andrew-lang-tales: real per-language sources or none at
+     all, no translation attempted). For those, check at the TOP of
+     initialize(), before building any index or registering any bus
+     events, whether any language this installation is configured for
+     is one you support. "Configured for" is the device's own 'lang'
+     PLUS 'secondary_langs' in mycroft.conf - self.native_langs in
+     ovos-workshop - not the device language alone: a HiveMind hub runs
+     one ovos-core for users in several languages and lists them in
+     secondary_langs.
 
          SUPPORTED_LANGUAGES = {"en", "da", "de"}  # whatever your source covers
 
          def initialize(self):
-             if not language_is_supported(self.lang, SUPPORTED_LANGUAGES):
+             self.served = configured_languages(self.native_langs) & SUPPORTED_LANGUAGES
+             if not self.served:
                  self.log.info(
-                     f"{self.skill_id}: device language '{self.lang}' not "
-                     f"supported and this provider does not translate - "
-                     f"skill will stay inert."
+                     f"{self.skill_id}: none of the configured languages "
+                     f"{sorted(self.native_langs)} is supported and this "
+                     f"provider does not translate - skill will stay inert."
                  )
-                 self.index = {}
                  return
-             # ... normal setup: build index, self.add_event(...), etc.
+             # ... normal setup for each language in self.served:
+             # build its index, load its locale meta, self.add_event(...)
 
      This is meaningfully better than gating inside handle_search(): the
      skill never wastes work building an index it can't use, never even
-     listens for ovos.common_reading.search on an unsupported device,
-     and the log clearly explains why at load time instead of the
-     provider just mysteriously never answering. See
+     listens for ovos.common_reading.search where nobody speaks its
+     languages, and the log clearly explains why at load time instead of
+     the provider just mysteriously never answering. See
      ovos-skill-andersen-tales's __init__.py for the real version of
-     this pattern.
+     this pattern, including one index per served language.
 
   5. NAME YOUR REPO/PACKAGE ovos-skill-<NAME>-<CONTENT TYPE>.
      Not a strict requirement, but every provider in this family follows
@@ -159,9 +165,27 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      ovos-skill-grimm-tales's __init__.py and locale/ for the real
      version of this pattern, and
      ovos-common-reading-pipeline-plugin#26 for the full reasoning.
+
+  7. ANSWER EACH REQUEST IN ITS OWN LANGUAGE.
+     Once loaded, decide per request - not from the device language -
+     whether and in which language to answer. The request's language is
+     the pipeline plugin's 'lang' field, else the language of the
+     session it was forwarded from (a HiveMind client's, on a hub), else
+     the device's own (an older plugin sends neither) - see
+     _request_lang() below. Answer search and ping only when that
+     language is one you serve (self.served for a non-translating
+     provider; configured_languages(self.native_langs) for a translating
+     one like this example). Answer fetch_content always: it is
+     addressed to you by skill_id and the plugin is waiting for it.
+
+     For a translating provider this matters twice over: a search in a
+     language nobody here speaks would otherwise load a translation
+     model and translate your whole title catalogue - on a test box, one
+     French search loaded NLLB once per translating provider (~7 GB).
 """
 
 from ovos_workshop.skills import OVOSSkill
+from ovos_bus_client.session import SessionManager
 from ovos_utils.parse import match_one
 from ovos_utils import classproperty
 from ovos_utils.process_utils import RuntimeRequirements
@@ -185,13 +209,11 @@ class ContentFetchError(Exception):
 
 
 def language_is_supported(lang, supported_languages):
-    """Pure helper for decision point #4 (see module docstring): pull
-    the base language code out of a full lang tag ('en-us' -> 'en') and
-    check it against your provider's supported set. Copy this check to
-    the top of your own initialize() if your source doesn't translate -
-    return early (no index built, no bus events registered) when this
-    is False, logging why."""
-    return lang.split("-")[0] in supported_languages
+    """True when a language tag ('en-us') is in a set of primary
+    subtags ({'en', 'da'}). Kept for providers built from an older copy
+    of this template - new ones gate on configured_languages() instead
+    (see decision points #4 and #7)."""
+    return primary_subtag(lang) in supported_languages
 
 
 # ovos.common_reading.* bus protocol - see ovos-skill-common-reading/README.md
@@ -220,6 +242,17 @@ COLLECTION_HINT_THRESHOLD = 0.85  # see ovos-skill-common-reading's README - don
 COLLECTION_NAME = "the OpenVoiceOS Blog"
 SOURCE_NAME = "blog.openvoiceos.org"
 
+
+
+def primary_subtag(lang):
+    """'en-US', 'en_gb', 'EN' -> 'en'."""
+    return (lang or "").replace("_", "-").split("-")[0].lower()
+
+
+def configured_languages(langs):
+    """Primary subtags of the languages an installation is configured
+    for (core lang + secondary_langs): ['en-US', 'da-DK'] -> {'en', 'da'}."""
+    return {primary_subtag(lang) for lang in langs or [] if lang}
 
 class CommonReadingExample(OVOSSkill):
     """PATTERN A provider - fully wired to the bus. Reads
@@ -439,7 +472,30 @@ class CommonReadingExample(OVOSSkill):
             return True
         return content_type.lower() in CONTENT_TYPES
 
+
+    @staticmethod
+    def _request_lang(message):
+        """The language a request was made in, or None when it does not
+        say: the pipeline plugin's own 'lang' field first, then the
+        language of the session the request was forwarded from (a
+        HiveMind client's, on a hub). An older plugin sends neither."""
+        lang = message.data.get("lang") or message.context.get("lang")
+        if not lang and message.context.get("session"):
+            lang = SessionManager.get(message).lang
+        return lang or None
+
+    def _serves(self, lang):
+        """This provider translates, so it could answer in any language -
+        but it only does for the languages this installation is
+        configured for (the device's lang plus secondary_langs in
+        mycroft.conf). A request in any other language would otherwise
+        load a translation model and translate the whole catalogue of
+        titles for a language nobody here speaks."""
+        return primary_subtag(lang) in configured_languages(self.native_langs)
+
     def handle_search(self, message):
+        if not self._serves(self._request_lang(message) or self.lang):
+            return  # not a language this installation is configured for
         if not self.index:
             return
         collection_hint = message.data.get("collection_hint")
@@ -496,6 +552,9 @@ class CommonReadingExample(OVOSSkill):
         exactly like COMMON_READING_SEARCH - a provider that refused to
         load for the device's language should stay silent here too,
         not falsely claim to be present."""
+        lang = self._request_lang(message)
+        if lang and not self._serves(lang):
+            return
         self.bus.emit(message.reply(COMMON_READING_PONG, {
             "skill_id": self.skill_id,
             "collection": COLLECTION_NAME,
