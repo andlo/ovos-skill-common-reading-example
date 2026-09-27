@@ -45,7 +45,7 @@ class instead. The exact selectors here (`itemprop="name"`,
 `itemprop="text"`) are specific to andersenstories.com; your source will
 need its own, found by inspecting its actual HTML.
 
-## Seven decisions that are on you, not the template
+## Ten decisions that are on you, not the template
 
 1. **Should this content be machine-translated?** Blog posts: usually
    fine, with disclosure via `machine_translated` in the search
@@ -60,11 +60,14 @@ need its own, found by inspecting its actual HTML.
    `<pre>` code blocks are dropped, but inline `<code>` is kept as part
    of its sentence (dropping it entirely broke sentence grammar - a real
    bug found while building `ovos-skill-ovosblog`).
-4. **If you don't translate, refuse to load for unsupported languages** -
-   don't just decline searches at runtime. Check `SUPPORTED_LANGUAGES`
-   at the top of `initialize()` (see `language_is_supported()` and the
-   module docstring) so an unsupported device never even builds an
-   index or registers bus events for a language it can't serve.
+4. **If you don't translate, refuse to load unless a configured language is
+   one you support** - don't just decline searches at runtime. "Configured"
+   is the device's `lang` plus `secondary_langs` in `mycroft.conf`
+   (`self.native_langs`): a HiveMind hub lists the languages its users
+   speak there. Intersect that with your `SUPPORTED_LANGUAGES` at the top of
+   `initialize()`, and stay inert (no index, no bus events, one clear log
+   line) when it's empty. `ovos-skill-andersen-tales` builds one index per
+   served language.
 5. **Name the repo/package `ovos-skill-<name>-<content type>`.** Not
    strictly required, but every real provider follows it -
    `ovos-skill-andersen-tales`, `ovos-skill-arxiv-papers`,
@@ -97,6 +100,28 @@ need its own, found by inspecting its actual HTML.
    decision #6, `COLLECTION_NAME` usually stays untranslated here too -
    proper nouns/brand names ("arXiv", "365tomorrows") don't need
    translating the way "Grimm's Fairy Tales" does.
+8. **Answer each request in its own language.** The request's language is
+   the plugin's `lang` field, else the session's (a HiveMind client's),
+   else the device's - see `_request_lang()`. Answer search and ping only in
+   a language you serve; always answer fetch_content. A translating
+   provider must still answer only in *configured* languages. Otherwise a
+   request in any language loads a translation model and translates your
+   whole title catalogue: one French search once loaded NLLB per
+   translating provider, ~7 GB on an 8 GB box.
+9. **Answer a search that names no title.** "Tell me a story" (the
+   plugin's `ReadAnyStory`, from 0.2.0) and "read me an article" search
+   with `phrase=None`. Offer a random story or the latest post at
+   `NO_TITLE_CONFIDENCE` (0.9), or 1.0 when the collection was named. Match
+   titles case-insensitively too.
+10. **Fetch politely, and extract text that reads well.** Send a
+    descriptive User-Agent (365tomorrows.com answers python-requests'
+    default with 403). Fetch a source as rarely as it changes: cache the
+    extracted text on disk, re-ask with If-Modified-Since, and back off
+    after failures (see `ovos-skill-bechstein-tales`). Never let an empty
+    fetch overwrite a good cached index. Take text with `get_text()`
+    and no separator, then collapse whitespace. Keep the source's own
+    paragraphs and verse lines, and drop page numbers, footnote markers
+    and editorial notes.
 
 See the module docstring in `__init__.py` for the full walkthrough.
 
