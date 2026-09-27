@@ -64,12 +64,13 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      blocks, navigation, ads, footers. Look at your specific source's
      HTML and decide what to keep (see extract_paragraphs below for one
      real example of this kind of decision - inline <code> is kept as
-     part of its sentence, but full <pre> code blocks are dropped).
+     part of its sentence, but full <pre> code blocks are dropped). How to
+     get that text out without mangling it is decision point #10.
 
   4. IF YOU DON'T TRANSLATE, REFUSE TO LOAD UNLESS A CONFIGURED LANGUAGE
      IS ONE YOU SUPPORT - DON'T JUST DECLINE SEARCHES AT RUNTIME.
      This example (Pattern A) translates, so it loads whatever the
-     language - see decision point #1 (and #7 for which languages it
+     language - see decision point #1 (and #8 for which languages it
      answers in). But most sources DON'T have a good reason to translate
      (see ovos-skill-andersen-tales/ovos-skill-grimm-tales/
      ovos-skill-andrew-lang-tales: real per-language sources or none at
@@ -166,7 +167,17 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      version of this pattern, and
      ovos-common-reading-pipeline-plugin#26 for the full reasoning.
 
-  7. ANSWER EACH REQUEST IN ITS OWN LANGUAGE.
+  7. IF YOU DO TRANSLATE, STILL LOCALIZE YOUR COLLECTION_ALIASES - WITH
+     AN ENGLISH FALLBACK INSTEAD OF A FIXED LANGUAGE SET.
+     A translating provider (this example's Pattern A) works in any
+     configured language, so there's no bounded list of locale/<lang>/
+     folders you can guarantee exist. _load_collection_aliases() loads
+     locale/<lang>/collection.voc where one exists and falls back to
+     FALLBACK_COLLECTION_ALIASES (English) otherwise, so collection_hint
+     matching never breaks completely. COLLECTION_NAME usually stays
+     untranslated: brand names ("arXiv", "365tomorrows") don't need it.
+
+  8. ANSWER EACH REQUEST IN ITS OWN LANGUAGE.
      Once loaded, decide per request - not from the device language -
      whether and in which language to answer. The request's language is
      the pipeline plugin's 'lang' field, else the language of the
@@ -182,6 +193,46 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      language nobody here speaks would otherwise load a translation
      model and translate your whole title catalogue - on a test box, one
      French search loaded NLLB once per translating provider (~7 GB).
+
+  9. ANSWER A SEARCH THAT NAMES NO TITLE.
+     "Tell me a story" (the pipeline plugin's ReadAnyStory intent, from
+     0.2.0) and "read me an article" search with phrase=None. A provider
+     that stays silent then is never picked. Offer something that fits the
+     content_type: a random story for a story provider, the latest post for
+     a feed like this one. Answer at NO_TITLE_CONFIDENCE (0.9), or 1.0 when
+     the collection itself was named ("a story from Grimm"). See
+     handle_search() below. Also match titles case-insensitively: titles
+     keep their case, spoken requests never do.
+
+  10. FETCH POLITELY, AND EXTRACT TEXT THAT READS WELL.
+     Fetching:
+     - Send a descriptive User-Agent (HTTP_HEADERS below). Some sites answer
+       python-requests' default with 403 - 365tomorrows.com, behind
+       Cloudflare, does.
+     - Fetch a source as rarely as it changes. For a book or anything else
+       that never changes, cache the extracted text on disk (the skill's XDG
+       cache directory), ask again with If-Modified-Since after a long
+       while, back off for a few minutes after a failure, and read the stale
+       copy meanwhile. Drop parse trees as soon as the text is out - a
+       Gutenberg book is 5-10 MB of BeautifulSoup. See
+       ovos-skill-bechstein-tales (StoryCache, extract_book()) for the
+       reference version.
+     - Never let an empty fetch (a feed with nothing today, e.g. arXiv on
+       weekends) overwrite a good cached index: raise instead, and let
+       refresh_index() fall back to the cache, as fetch_feed_index() does.
+     Extracting:
+     - get_text() with no separator, then collapse the whitespace - see
+       extract_paragraphs() for what both other forms get wrong.
+     - Keep the source's own paragraphs (a <div> per paragraph on
+       andersenstories.com/grimmstories.com, not one .text for the whole
+       story): the reading plugin pauses between them, and its SSML
+       narration marks them.
+     - A <br> inside a paragraph is a line break (verse); a newline in the
+       HTML source is just whitespace.
+     - Drop what isn't the text: page numbers (<span class="pagenum">),
+       footnote markers ([1]) and their notes, editorial source notes,
+       licence boilerplate. Read verse (<pre>, <div class="verse">), which
+       only-<p> extraction skips.
 """
 
 from ovos_workshop.skills import OVOSSkill
@@ -195,6 +246,21 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import time
 import json
+
+
+def _user_agent():
+    """Say who is asking. Some sites answer python-requests' default
+    User-Agent with 403 (365tomorrows.com behind Cloudflare does), and a
+    descriptive one is what sites ask automated clients to send."""
+    try:
+        from importlib.metadata import version
+        ver = version("ovos-skill-common-reading-example")
+    except Exception:
+        ver = "unknown"
+    return f"ovos-skill-common-reading-example/{ver} (+https://github.com/andlo/ovos-skill-common-reading-example)"
+
+
+HTTP_HEADERS = {"User-Agent": _user_agent()}
 
 # --- PATTERN A: RSS FEED config ---
 FEED_URL = "https://blog.openvoiceos.org/feed.xml"
@@ -212,7 +278,7 @@ def language_is_supported(lang, supported_languages):
     """True when a language tag ('en-us') is in a set of primary
     subtags ({'en', 'da'}). Kept for providers built from an older copy
     of this template - new ones gate on configured_languages() instead
-    (see decision points #4 and #7)."""
+    (see decision points #4 and #8)."""
     return primary_subtag(lang) in supported_languages
 
 
@@ -229,6 +295,11 @@ COMMON_READING_FETCH_CONTENT_RESPONSE = "ovos.common_reading.fetch_content.respo
 # ovos-common-reading-pipeline-plugin's README, section 3.
 COMMON_READING_PING = "ovos.common_reading.ping"
 COMMON_READING_PONG = "ovos.common_reading.pong"
+
+# the confidence of an answer to a search that named no title (decision
+# point #8): the pipeline plugin reads anything from 0.8 up without asking
+# "is it that one?", and a named title's own match should still win
+NO_TITLE_CONFIDENCE = 0.9
 
 # DECISION POINT #2 (see module docstring): pick names a human would
 # actually say, not your skill_id. DECISION POINT #7: since this
@@ -346,7 +417,7 @@ class CommonReadingExample(OVOSSkill):
         """PATTERN A core: fetch + parse an RSS feed with stdlib
         xml.etree (no extra dependency needed for this part)."""
         try:
-            r = requests.get(FEED_URL, timeout=10)
+            r = requests.get(FEED_URL, timeout=10, headers=HTTP_HEADERS)
             r.raise_for_status()
         except requests.RequestException as e:
             raise ContentFetchError(f"failed to fetch {FEED_URL}: {e}") from e
@@ -381,7 +452,14 @@ class CommonReadingExample(OVOSSkill):
         entirely broke sentence grammar ('ovos-installer exists to...'
         lost its subject, which was wrapped in <code>). Full <pre> blocks
         (multi-line shell commands) genuinely aren't useful read aloud
-        and are dropped; inline <code> is unwrapped and kept as text."""
+        and are dropped; inline <code> is unwrapped and kept as text.
+
+        Take the text with get_text() and no separator, then collapse the
+        whitespace. get_text(" ", strip=True) puts a space at every tag
+        boundary ("threshold ." after a <code>, "False ," after a <b> -
+        451 of them in the OVOS blog's feed), and get_text(strip=True)
+        glues the words on either side of a tag together ("energy.The
+        roads") - see decision point #10."""
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup.find_all("pre"):
             tag.decompose()
@@ -389,7 +467,7 @@ class CommonReadingExample(OVOSSkill):
             tag.unwrap()
         paragraphs = []
         for tag in soup.find_all(["h1", "h2", "h3", "p", "li"]):
-            text = tag.get_text(" ", strip=True)
+            text = " ".join(tag.get_text().split())
             if text:
                 paragraphs.append(text)
         return paragraphs
@@ -509,16 +587,27 @@ class CommonReadingExample(OVOSSkill):
         if titles is None:
             return  # can't offer this language - see _get_translated_titles docstring
 
-        phrase = message.data.get("phrase")
+        phrase = (message.data.get("phrase") or "").strip()
         if phrase:
-            title, confidence = match_one(phrase, list(titles.values()))
-            link = next(l for l, t in titles.items() if t == title)
-        elif collection_hint:
+            # titles keep their case, spoken requests don't - compare both
+            # lower case, or "boring installs" only scores ~0.9 against
+            # "Boring Installs"
+            by_lower = {t.lower(): l for l, t in titles.items()}
+            match, confidence = match_one(phrase.lower(), list(by_lower))
+            link = by_lower[match]
+            title = titles[link]
+        else:
+            # DECISION POINT #9: no title asked for - "read me an article",
+            # or (for a story provider) the pipeline's "tell me a story",
+            # which searches with phrase=None. Offer something rather than
+            # stay silent: here the latest post; a story provider offers a
+            # random story. Fully confident only when the collection itself
+            # was named; otherwise NO_TITLE_CONFIDENCE, which is read
+            # without an "is it that one?" question but loses to a title
+            # somebody actually named.
             link = self._latest_link()
             title = titles[link]
-            confidence = 1.0
-        else:
-            return
+            confidence = 1.0 if collection_hint else NO_TITLE_CONFIDENCE
 
         self.bus.emit(message.reply(COMMON_READING_SEARCH_RESPONSE, {
             "skill_id": self.skill_id,
@@ -580,7 +669,7 @@ class StaticPageScraper:
     @staticmethod
     def get_soup(url):
         try:
-            r = requests.get(url, timeout=10)
+            r = requests.get(url, timeout=10, headers=HTTP_HEADERS)
             r.raise_for_status()
             r.encoding = r.apparent_encoding
             return BeautifulSoup(r.text, "html.parser")
