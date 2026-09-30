@@ -65,7 +65,7 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      HTML and decide what to keep (see extract_paragraphs below for one
      real example of this kind of decision - inline <code> is kept as
      part of its sentence, but full <pre> code blocks are dropped). How to
-     get that text out without mangling it is decision point #10.
+     get that text out without mangling it is decision point #11.
 
   4. IF YOU DON'T TRANSLATE, REFUSE TO LOAD UNLESS A CONFIGURED LANGUAGE
      IS ONE YOU SUPPORT - DON'T JUST DECLINE SEARCHES AT RUNTIME.
@@ -204,7 +204,26 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
      handle_search() below. Also match titles case-insensitively: titles
      keep their case, spoken requests never do.
 
-  10. FETCH POLITELY, AND EXTRACT TEXT THAT READS WELL.
+  10. ANNOUNCE YOUR VOCABULARY, OR NOTHING REACHES YOU.
+     Since pipeline 0.3.0 a request is only claimed when it names a kind of
+     text, a collection or a title some provider announced (like OCP's
+     keywords). Send ovos.common_reading.vocabulary once per language you
+     serve when you load, and again on ovos.common_reading.vocabulary.get -
+     see _announce_vocabulary() below:
+     - content_types: {canonical name: the words for it in that language},
+       from locale/<lang>/content_type.voc. The canonical name
+       (CONTENT_TYPES[0]) is what a search then carries as content_type.
+       Story providers can skip it: the pipeline knows "story"/"tale"/
+       "fairy tale" in its 8 languages.
+     - collections: your collection.voc for that language.
+     - titles (optional): what "tell me the <title>" may be claimed for,
+       at the pipeline's low stage. Only titles that are never an everyday
+       phrase; leave them out when they change daily or are translated.
+     Make sure every word you announce is really something you can read:
+     "report" or "update" would take "tell me the weather report" away
+     from the weather skill.
+
+  11. FETCH POLITELY, AND EXTRACT TEXT THAT READS WELL.
      Fetching:
      - Send a descriptive User-Agent (HTTP_HEADERS below). Some sites answer
        python-requests' default with 403 - 365tomorrows.com, behind
@@ -237,6 +256,9 @@ PER PROVIDER, THIS TEMPLATE ONLY SHOWS *HOW*, NOT WHETHER:
 
 from ovos_workshop.skills import OVOSSkill
 from ovos_bus_client.session import SessionManager
+from ovos_bus_client.message import Message
+import re
+from pathlib import Path
 from ovos_utils.parse import match_one
 from ovos_utils import classproperty
 from ovos_utils.process_utils import RuntimeRequirements
@@ -270,6 +292,22 @@ DC_CREATOR_TAG = "{http://purl.org/dc/elements/1.1/}creator"
 STATIC_INDEX_URL = "https://www.andersenstories.com/en/andersen_fairy-tales/list"
 
 
+def _read_voc(path):
+    """Phrases in a .voc file: one per line, "a|b" and "(a|b) c" expanded
+    the simple way ovos-workshop does for single groups."""
+    phrases = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^(.*)\(([^)]*)\)(.*)$", line)
+        if m:
+            phrases += [" ".join(f"{m.group(1)}{alt}{m.group(3)}".split()) for alt in m.group(2).split("|")]
+        else:
+            phrases += [alt.strip() for alt in line.split("|") if alt.strip()]
+    return phrases
+
+
 class ContentFetchError(Exception):
     """Raised when content could not be fetched or parsed."""
 
@@ -295,6 +333,12 @@ COMMON_READING_FETCH_CONTENT_RESPONSE = "ovos.common_reading.fetch_content.respo
 # ovos-common-reading-pipeline-plugin's README, section 3.
 COMMON_READING_PING = "ovos.common_reading.ping"
 COMMON_READING_PONG = "ovos.common_reading.pong"
+# vocabulary: the words people use for what this provider can read, one
+# message per language it serves - announced when it loads and whenever
+# the pipeline asks (see the pipeline plugin's README, "4. Vocabulary").
+# Without it the pipeline (0.3.0+) never sends a request here.
+COMMON_READING_VOCABULARY = "ovos.common_reading.vocabulary"
+COMMON_READING_VOCABULARY_GET = "ovos.common_reading.vocabulary.get"
 
 # the confidence of an answer to a search that named no title (decision
 # point #8): the pipeline plugin reads anything from 0.8 up without asking
@@ -353,6 +397,8 @@ class CommonReadingExample(OVOSSkill):
         self.add_event(COMMON_READING_SEARCH, self.handle_search)
         self.add_event(f"{COMMON_READING_FETCH_CONTENT}.{self.skill_id}", self.handle_fetch_content)
         self.add_event(COMMON_READING_PING, self.handle_ping)
+        self.add_event(COMMON_READING_VOCABULARY_GET, self.handle_vocabulary_get)
+        self._announce_vocabulary()
 
     def _load_collection_aliases(self):
         """DECISION POINT #7 (see module docstring): since this provider
@@ -459,7 +505,7 @@ class CommonReadingExample(OVOSSkill):
         boundary ("threshold ." after a <code>, "False ," after a <b> -
         451 of them in the OVOS blog's feed), and get_text(strip=True)
         glues the words on either side of a tag together ("energy.The
-        roads") - see decision point #10."""
+        roads") - see decision point #11."""
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup.find_all("pre"):
             tag.decompose()
@@ -629,6 +675,50 @@ class CommonReadingExample(OVOSSkill):
         paragraphs = self.extract_paragraphs(entry["html"])
         paragraphs, _ = self._maybe_translate_paragraphs(paragraphs, self.lang)
         self.bus.emit(message.reply(COMMON_READING_FETCH_CONTENT_RESPONSE, {"paragraphs": paragraphs}))
+
+    def _vocabulary_langs(self):
+        return sorted(configured_languages(self.native_langs))
+
+    def _locale_words(self, name, lang):
+        """The phrases of locale/<lang>/<name>.voc for a primary language
+        tag ("da"), or [] when this skill has no such file for it."""
+        base = Path(__file__).resolve().parent / "locale"
+        for folder in sorted(base.iterdir()) if base.is_dir() else []:
+            if folder.name.split("-")[0] == lang and (folder / f"{name}.voc").is_file():
+                return _read_voc(folder / f"{name}.voc")
+        return []
+
+    def _vocabulary(self, lang):
+        """The kind of text this provider serves (locale/<lang>/content_type.voc,
+        announced under its canonical name CONTENT_TYPES[0]) and its
+        collection names (collection.voc) in `lang`. No titles: they change
+        daily and are only known in the source's own language."""
+        words = self._locale_words("content_type", lang)
+        return {"content_types": {CONTENT_TYPES[0]: words} if words else {},
+                "collections": self._locale_words("collection", lang) or list(FALLBACK_COLLECTION_ALIASES)}
+
+    def _announce_vocabulary(self, langs=None, message=None):
+        """One ovos.common_reading.vocabulary per language served (and
+        asked for, when the pipeline named languages)."""
+        wanted = {str(l).lower().split("-")[0].split("_")[0] for l in (langs or [])}
+        for lang in self._vocabulary_langs():
+            if wanted and lang not in wanted:
+                continue
+            data = {"skill_id": self.skill_id, "lang": lang, **self._vocabulary(lang)}
+            msg = message.reply(COMMON_READING_VOCABULARY, data) if message else \
+                Message(COMMON_READING_VOCABULARY, data)
+            self.bus.emit(msg)
+
+    def handle_vocabulary_get(self, message):
+        self._announce_vocabulary(message.data.get("langs"), message)
+
+    def shutdown(self):
+        """The pipeline stops sending requests meant for this provider."""
+        try:
+            self.bus.emit(Message(COMMON_READING_VOCABULARY, {"skill_id": self.skill_id, "remove": True}))
+        except Exception:
+            pass
+        super().shutdown()
 
     def handle_ping(self, message):
         """Cheap 'is anyone there?' reply - no index lookup, no
